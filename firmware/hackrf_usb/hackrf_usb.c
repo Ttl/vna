@@ -124,8 +124,8 @@ static const usb_request_handler_fn vendor_request_handler[] = {
 	usb_vendor_request_read_version_string, //15
     NULL,
     NULL,
-	usb_vendor_request_read_partid_serialno, //19
-    NULL,
+	usb_vendor_request_read_partid_serialno, //18
+    usb_vendor_request_read_mcp3021, //19
     NULL,
     NULL,
 	NULL,

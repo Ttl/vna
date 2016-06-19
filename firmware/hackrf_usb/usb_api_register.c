@@ -32,6 +32,9 @@
 
 #include "sgpio.h"
 #include "sgpio_isr.h"
+#include "mcp3021.h"
+
+uint8_t mcp3021_result[2];
 
 usb_request_status_t usb_vendor_request_write_source(
 	usb_endpoint_t* const endpoint,
@@ -74,7 +77,6 @@ usb_request_status_t usb_vendor_request_write_att(
 	}
     return USB_REQUEST_STATUS_OK;
 }
-
 
 
 usb_request_status_t usb_vendor_request_set_tx_port(
@@ -172,6 +174,22 @@ usb_request_status_t usb_vendor_request_clear_gpio(
             gpio_clear(PORT_LED1_3, PIN_LED1);
         }
         usb_transfer_schedule_ack(endpoint->in);
+	}
+    return USB_REQUEST_STATUS_OK;
+}
+
+usb_request_status_t usb_vendor_request_read_mcp3021(
+	usb_endpoint_t* const endpoint, const usb_transfer_stage_t stage)
+{
+
+	if (stage == USB_TRANSFER_STAGE_SETUP)
+	{
+        //mcp3021_start_conversion();
+        uint16_t result = mcp3021_read_result();
+        mcp3021_result[0] = result >> 8;
+        mcp3021_result[1] = result & 0xFF;
+        usb_transfer_schedule_block(endpoint->in, &mcp3021_result, 2, NULL, NULL);
+		usb_transfer_schedule_ack(endpoint->out);
 	}
     return USB_REQUEST_STATUS_OK;
 }
