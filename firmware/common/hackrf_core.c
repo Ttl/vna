@@ -55,7 +55,7 @@ void cpu_clock_init(void)
 
 	//FIXME disable I2C
 	/* Kick I2C0 down to 400kHz when we switch over to APB1 clock = 204MHz */
-	//i2c0_init(255);
+	i2c1_init(255);
 
 	/*
 	 * 12MHz clock is entering LPC XTAL1/OSC input now.  On
@@ -341,6 +341,8 @@ void pin_setup(void) {
 	scu_pinmux(SCU_PINMUX_ATT_LE, SCU_GPIO_NOPULL);
 	scu_pinmux(SCU_PINMUX_PWDN, SCU_GPIO_NOPULL);
 	scu_pinmux(SCU_PINMUX_GP_CLKIN, SCU_CLK_IN | SCU_CONF_FUNCTION1);
+	scu_pinmux(SCU_PINMUX_I2C_SDA, SCU_CONF_FUNCTION1);
+	scu_pinmux(SCU_PINMUX_I2C_SCL, SCU_CONF_FUNCTION1);
 
 	/* Configure all GPIO as Input (safe state) */
 	GPIO0_DIR = 0;

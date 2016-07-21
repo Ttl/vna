@@ -52,17 +52,26 @@
 #include "sgpio_isr.h"
 #include "usb_bulk_buffer.h"
 #include "sgpio.h"
+#include "adchs.h"
+
+#define USB_DATA_TRANSFER_SIZE_BYTE (ADCHS_DATA_TRANSFER_SIZE_BYTE)
+#define USB_BULK_BUFFER_MASK ((32768) - 1)
+#define get_usb_buffer_offset() (usb_bulk_buffer_offset)
+#define set_usb_buffer_offset(val) (usb_bulk_buffer_offset = val)
+/* Manage round robin after increment with USB_BULK_BUFFER_MASK */
+#define inc_mask_usb_buffer_offset(buff_offset, inc_value) ((buff_offset+inc_value) & USB_BULK_BUFFER_MASK)
+
 
 #define SLAVE_TXEV_FLAG ((uint32_t *) 0x40043400)
 #define SLAVE_TXEV_QUIT() { *SLAVE_TXEV_FLAG = 0x0; }
 
 static volatile transceiver_mode_t _transceiver_mode = TRANSCEIVER_MODE_OFF;
 
-static unsigned int phase = 1;
+static volatile int new_transfer = 0;
+
+const int use_packing = 0;
 
 void set_transceiver_mode(const transceiver_mode_t new_transceiver_mode) {
-	baseband_streaming_disable();
-
 	usb_endpoint_disable(&usb_endpoint_bulk_in);
 	usb_endpoint_disable(&usb_endpoint_bulk_out);
 
@@ -71,13 +80,8 @@ void set_transceiver_mode(const transceiver_mode_t new_transceiver_mode) {
 	if( _transceiver_mode == TRANSCEIVER_MODE_RX ) {
         usb_endpoint_init(&usb_endpoint_bulk_in);
         usb_bulk_buffer_offset = 0;
-        phase = 1;
 	} else if (_transceiver_mode == TRANSCEIVER_MODE_TX) {
 		//usb_endpoint_init(&usb_endpoint_bulk_out);
-	}
-
-	if( _transceiver_mode != TRANSCEIVER_MODE_OFF ) {
-		baseband_streaming_enable();
 	}
 }
 
@@ -126,7 +130,7 @@ static const usb_request_handler_fn vendor_request_handler[] = {
     NULL,
 	usb_vendor_request_read_partid_serialno, //18
     usb_vendor_request_read_mcp3021, //19
-    NULL,
+    usb_vendor_request_sample, //20
     NULL,
 	NULL,
 	NULL,
@@ -199,48 +203,75 @@ void usb_set_descriptor_by_serial_number(void)
 	}
 }
 
-//void m0_startup(void)
-//{
-//  uint32_t *src, *dest;
-//
-//  /* Halt M0 core (in case it was running) */
-//  ipc_halt_m0();
-//
-//  /* Copy M0 code from M4 embedded addr to final addr M0 */
-//  dest = &cm0_exec_baseaddr;
-//  for(src = (uint32_t *)&m0_bin[0]; src < (uint32_t *)(&m0_bin[0]+m0_bin_size); )
-//  {
-//    *dest++ = *src++;
-//  }
-//
-//  ipc_start_m0( (uint32_t)(&cm0_exec_baseaddr) );
-//}
+void adchs_start(uint8_t chan_num)
+{
+  int i;
+  uint32_t *dst;
 
-//void m0s_startup(void)
-//{
-//  uint32_t *src, *dest;
-//
-//  /* Halt M0 core (in case it was running) */
-//  ipc_halt_m0s();
-//
-//  /* Copy M0 code from M4 embedded addr to final addr M0 */
-//  dest = &cm0s_exec_baseaddr;
-//  for(src = (uint32_t *)&m0s_bin[0]; src < (uint32_t *)(&m0s_bin[0]+m0s_bin_size); )
-//  {
-//    *dest++ = *src++;
-//  }
-//
-//  ipc_start_m0s( (uint32_t)(&cm0s_exec_baseaddr) );
-//}
+  /* Disable IRQ globally */
+  __asm__("cpsid i");
+
+
+  /* Clear ADCHS Buffer */
+  dst = (uint32_t *)ADCHS_DATA_BUFFER;
+  for(i=0; i<(ADCHS_DATA_BUFFER_SIZE_BYTE/4); i++)
+  {
+    dst[i] = 0;
+  }
+  usb_bulk_buffer_offset = 0;
+
+  ADCHS_init();
+  ADCHS_desc_init(chan_num);
+  ADCHS_DMA_init((uint32_t)ADCHS_DATA_BUFFER, use_packing);
+
+  LPC_ADCHS->TRIGGER = 1;
+  __asm("dsb");
+
+  /* Enable IRQ globally */
+  __asm__("cpsie i");
+}
+
+void adchs_stop(void)
+{
+  /* Disable IRQ globally */
+  __asm__("cpsid i");
+
+  ADCHS_deinit();
+
+  /* Enable IRQ globally */
+  __asm__("cpsie i");
+}
+
+void dma_isr(void)
+{
+  uint32_t status;
+  #define INTTC0  (1)
+  //gpio_set(PORT_LED1_3, PIN_LED1);
+
+  status = LPC_GPDMA->INTTCSTAT;
+  if( status & INTTC0 && new_transfer == 0 )
+  {
+    set_transceiver_mode(TRANSCEIVER_MODE_RX);
+    LPC_GPDMA->INTTCCLEAR |= INTTC0; /* Clear Chan0 */
+    if(use_packing)
+    {
+        set_usb_buffer_offset( inc_mask_usb_buffer_offset(get_usb_buffer_offset(), 8192));
+    }
+    else
+    {
+        set_usb_buffer_offset( inc_mask_usb_buffer_offset(get_usb_buffer_offset(), USB_DATA_TRANSFER_SIZE_BYTE) );
+    }
+    new_transfer = 1;
+  }
+
+  //gpio_clear(PORT_LED1_3, PIN_LED1);
+}
 
 int main(void) {
 	pin_setup();
-    gpio_set(PORT_LED1_3, PIN_LED1);
-
 	cpu_clock_init();
 
-    //m0_startup();
-
+    ipc_halt_m0();
     ipc_halt_m0s();
 
     // Disable M0 Sub
@@ -263,43 +294,35 @@ int main(void) {
 	usb_endpoint_init(&usb_endpoint_control_in);
 
 	nvic_set_priority(NVIC_USB0_IRQ, 255);
-    //vector_table.irq[NVIC_SGPIO_IRQ] = sgpio_isr_rx;
+    nvic_set_priority(NVIC_DMA_IRQ, 1);
+
+    nvic_enable_irq(NVIC_DMA_IRQ);
 
 	usb_run(&usb_device);
 	ssp1_init();
+
+    adchs_start(0);
 
     //sgpio_configure();
 
 	while(true) {
 
-		// Set up IN transfer of buffer 0.
-		if ( usb_bulk_buffer_offset >= 16384
-		     && phase == 1
-		     && transceiver_mode() != TRANSCEIVER_MODE_OFF) {
-			usb_transfer_schedule_block(
-				(transceiver_mode() == TRANSCEIVER_MODE_RX)
-				? &usb_endpoint_bulk_in : &usb_endpoint_bulk_out,
-				&usb_bulk_buffer[0x0000],
-				0x4000,
-				NULL, NULL
-				);
-			phase = 0;
-		}
+        /*
+        if (gpio_get(PORT_LO_LD, PIN_LO_LD )) {
+            gpio_set(PORT_LED1_3, PIN_LED1);
+        } else {
+            gpio_clear(PORT_LED1_3, PIN_LED1);
+        }
+        */
 
-		// Set up IN transfer of buffer 1.
-		if ( usb_bulk_buffer_offset < 16384
-		     && phase == 0
-		     && transceiver_mode() != TRANSCEIVER_MODE_OFF) {
-			usb_transfer_schedule_block(
-				(transceiver_mode() == TRANSCEIVER_MODE_RX)
-				? &usb_endpoint_bulk_in : &usb_endpoint_bulk_out,
-				&usb_bulk_buffer[0x4000],
-				0x4000-32, // Last 32 bytes are unused
-				NULL, NULL
-			);
-			phase = 1;
-		}
+        if(new_transfer)
+        {
+          gpio_set(PORT_LED1_3, PIN_LED1);
+          usb_transfer_schedule_block(&usb_endpoint_bulk_in, &usb_bulk_buffer[0], 0x4000, NULL, NULL);
+          gpio_clear(PORT_LED1_3, PIN_LED1);
+          new_transfer = 0;
+        }
+
 	}
-
 	return 0;
 }

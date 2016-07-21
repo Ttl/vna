@@ -7,8 +7,10 @@
 @version 1.0.0
 
 @author @htmlonly &copy; @endhtmlonly 2012 Michael Ossmann <mike@ossmann.com>
+@author @htmlonly &copy; @endhtmlonly 2013 Benjamin Vernoux <bvernoux@gmail.com>
+@author @htmlonly &copy; @endhtmlonly 2014 Jared Boone <jared@sharebrained.com>
 
-@date 10 March 2013
+@date 19 December 2013
 
 LGPL License Terms @ref lgpl_license
  */
@@ -16,6 +18,8 @@ LGPL License Terms @ref lgpl_license
  * This file is part of the libopencm3 project.
  *
  * Copyright (C) 2012 Michael Ossmann <mike@ossmann.com>
+ * Copyright (C) 2013 Benjamin Vernoux <bvernoux@gmail.com>
+ * Copyright (C) 2014 Jared Boone <jared@sharebrained.com>
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -38,6 +42,10 @@ LGPL License Terms @ref lgpl_license
 
 #include <libopencm3/cm3/common.h>
 #include <libopencm3/lpc43xx/memorymap.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* --- Convenience macros -------------------------------------------------- */
 
@@ -151,14 +159,33 @@ LGPL License Terms @ref lgpl_license
 
 BEGIN_DECLS
 
+typedef uint32_t i2c_port_t;
+
+void i2c_init(i2c_port_t port, const uint16_t duty_cycle_count);
+void i2c_disable(i2c_port_t port);
+void i2c_tx_start(i2c_port_t port);
+void i2c_tx_byte(i2c_port_t port, uint8_t byte);
+uint8_t i2c_rx_byte(i2c_port_t port);
+void i2c_stop(i2c_port_t port);
+
 void i2c0_init(const uint16_t duty_cycle_count);
 void i2c0_tx_start(void);
 void i2c0_tx_byte(uint8_t byte);
 uint8_t i2c0_rx_byte(void);
 void i2c0_stop(void);
 
+void i2c1_init(const uint16_t duty_cycle_count);
+void i2c1_tx_start(void);
+void i2c1_tx_byte(uint8_t byte);
+uint8_t i2c1_rx_byte(bool ack);
+void i2c1_stop(void);
+
 END_DECLS
 
 /**@}*/
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

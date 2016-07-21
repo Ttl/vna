@@ -38,12 +38,11 @@ void i2c_lpc_stop(i2c_bus_t* const bus) {
 	i2c_disable(port);
 }
 
-void i2c_lpc_transfer(i2c_bus_t* const bus,
+void i2c_lpc_transfer(const uint32_t port,
 	const uint_fast8_t slave_address,
 	const uint8_t* const data_tx, const size_t count_tx,
 	uint8_t* const data_rx, const size_t count_rx
 ) {
-	const uint32_t port = (uint32_t)bus->obj;
 	i2c_tx_start(port);
 	i2c_tx_byte(port, (slave_address << 1) | I2C_WRITE);
 	for(size_t i=0; i<count_tx; i++) {

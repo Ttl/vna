@@ -123,6 +123,19 @@ void source_write_register(uint32_t data) {
     gpio_set(PORT_SOURCE_LE, PIN_SOURCE_LE);
 }
 
+void wait_for_source_lock() {
+    while (gpio_get(PORT_SOURCE_LD, PIN_SOURCE_LD ));
+}
+
+void wait_for_lo_lock() {
+    while (gpio_get(PORT_LO_LD, PIN_LO_LD ));
+}
+
+void wait_for_lock() {
+    //Assumes that PORT_SOURCE_LD == PORT_LO_LD
+    while (gpio_get(PORT_SOURCE_LD, PIN_SOURCE_LD | PIN_LO_LD) == (PIN_SOURCE_LD | PIN_LO_LD));
+}
+
 /* FIXME: Send only 8 bits */
 void att_write_register(uint8_t data) {
     gpio_clear(PORT_ATT_LE, PIN_ATT_LE);
