@@ -2,6 +2,7 @@
 #include <libopencm3/lpc43xx/scu.h>
 #include <libopencm3/lpc43xx/ssp.h>
 #include "hackrf_core.h"
+#include "adchs.h"
 
 static void spi_write_register(uint32_t data);
 
@@ -146,4 +147,46 @@ void att_write_register(uint8_t data) {
          __asm__("nop");
     }
     gpio_clear(PORT_ATT_LE, PIN_ATT_LE);
+}
+
+void sample(uint32_t ports) {
+#define CH_DELAY 41000/5
+
+    if (ports == 1) {
+        set_rx_channel(0);
+        wait_for_lock();
+        delay(1000);
+        ADCHS_restart_dma();
+        delay(2*CH_DELAY);
+        set_rx_channel(2);
+        delay(2*CH_DELAY);
+    }
+    if (ports == 2) {
+        set_rx_channel(1);
+        wait_for_lock();
+        delay(1000);
+        ADCHS_restart_dma();
+        delay(2*CH_DELAY);
+        set_rx_channel(3);
+        delay(2*CH_DELAY);
+    }
+    if (ports == 3) {
+        // 2000 samples/channel. 104 MHz system clock rate, 9.6 MHz ADC clock.
+        set_rx_channel(0);
+        wait_for_lock();
+        //Switch settling time 50us
+        delay(1000);
+        ADCHS_restart_dma();
+        delay(CH_DELAY);
+        set_rx_channel(1);
+        delay(CH_DELAY);
+        set_rx_channel(2);
+        delay(CH_DELAY);
+        set_rx_channel(3);
+    // FIXME
+#if 1
+        delay(CH_DELAY);
+        set_rx_channel(0);
+#endif
+    }
 }

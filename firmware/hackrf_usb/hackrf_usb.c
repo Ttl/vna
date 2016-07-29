@@ -317,9 +317,8 @@ int main(void) {
 
         if(new_transfer)
         {
-          gpio_set(PORT_LED1_3, PIN_LED1);
           usb_transfer_schedule_block(&usb_endpoint_bulk_in, &usb_bulk_buffer[0], 0x4000, NULL, NULL);
-          gpio_clear(PORT_LED1_3, PIN_LED1);
+          usb_transfer_schedule_block(&usb_endpoint_bulk_in, &usb_bulk_buffer[0x4000], 0x4000, NULL, NULL);
           new_transfer = 0;
         }
 

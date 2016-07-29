@@ -158,8 +158,93 @@ void cpu_clock_init(void)
         | CGU_BASE_VADC_CLK_CLK_SEL(CGU_SRC_PLL0AUDIO);
 
 
-    ///XXX: Audio PLL to CLK0 pin
-    CGU_BASE_OUT_CLK = CGU_BASE_OUT_CLK_CLK_SEL(CGU_SRC_PLL0AUDIO);
+    //For Clock debugging. Connects PLL0Audio to CLK0 output
+    //CGU_BASE_OUT_CLK = CGU_BASE_OUT_CLK_CLK_SEL(CGU_SRC_PLL0AUDIO);
+
+    /* ****************************************** */
+    /* Disable/PowerDown unused clock/peripherals */
+    /* ****************************************** */
+    CREG_CREG6 |= (1<<17); // PowerDown RNG
+
+    // CGU_BASE_SAFE_CLK = CGU_BASE_USB1_CLK_PD(1);
+
+    // CGU_BASE_USB0_CLK is used for USB0 HS
+    // CGU_BASE_M0_CLK is used
+    /* Switch off USB1 clock */
+    CGU_BASE_USB1_CLK = CGU_BASE_USB1_CLK_PD(1);
+    // CGU_BASE_M4_CLK is used
+    // CGU_BASE_SPIFI_CLK = CGU_BASE_SPIFI_CLK_PD(1);
+    /* Switch off SPI clock */
+    CGU_BASE_SPI_CLK = CGU_BASE_SPI_CLK_PD(1);
+    /* Switch off PHY RX & TX clock */
+    CGU_BASE_PHY_RX_CLK = CGU_BASE_PHY_RX_CLK_PD(1);
+    CGU_BASE_PHY_TX_CLK = CGU_BASE_PHY_TX_CLK_PD(1);
+    // CGU_BASE_APB1_CLK is used for I2C0
+    // CGU_BASE_APB3_CLK is used for I2C1
+    /* Switch off LCD clock */
+    CGU_BASE_LCD_CLK = CGU_BASE_LCD_CLK_PD(1);
+    // CGU_BASE_ADCHS_CLK is used
+    /* Switch off SDIO clock */
+    CGU_BASE_SDIO_CLK = CGU_BASE_SDIO_CLK_PD(1);
+//    CGU_BASE_SSP0_CLK = CGU_BASE_SSP0_CLK_PD(1);
+    /* Switch off SSP1 clock */
+    //CGU_BASE_SSP1_CLK = CGU_BASE_SSP1_CLK_PD(1);
+    /* Switch off UART0 to 3 clock */
+    CGU_BASE_UART0_CLK = CGU_BASE_UART0_CLK_PD(1);
+    CGU_BASE_UART1_CLK = CGU_BASE_UART1_CLK_PD(1);
+    CGU_BASE_UART2_CLK = CGU_BASE_UART2_CLK_PD(1);
+    CGU_BASE_UART3_CLK = CGU_BASE_UART3_CLK_PD(1);
+    /*  Switch off OUT clocks */
+    CGU_BASE_OUT_CLK = CGU_BASE_OUT_CLK_PD(1);
+    /* Reserved/Undocumented clocks power down */
+    CGU_OUTCLK_21_CTRL = 1;
+    CGU_OUTCLK_22_CTRL = 1;
+    CGU_OUTCLK_23_CTRL = 1;
+    CGU_OUTCLK_24_CTRL = 1;
+    /* Switch off AUDIO clock */
+    //CGU_BASE_AUDIO_CLK = CGU_BASE_AUDIO_CLK_PD(1);
+    CGU_BASE_CGU_OUT0_CLK = CGU_BASE_CGU_OUT0_CLK_PD(1);
+    CGU_BASE_CGU_OUT1_CLK = CGU_BASE_CGU_OUT1_CLK_PD(1);
+    /* Switch off IDIV C,D,E disabled */
+    CGU_IDIVC_CTRL = CGU_IDIVC_CTRL_PD(1);
+    CGU_IDIVD_CTRL = CGU_IDIVD_CTRL_PD(1);
+    CGU_IDIVE_CTRL = CGU_IDIVE_CTRL_PD(1);
+    /*
+    // Power down M4 branches, but not BUS, GPIO, CREG and M0 & M4 CORE clock
+    */
+    //CCU1_CLK_M4_BUS_CFG &= ~(1);
+    //CCU1_CLK_M4_SPIFI_CFG &= ~(1);
+    //CCU1_CLK_M4_GPIO_CFG &= ~(1);
+    CCU1_CLK_M4_LCD_CFG &= ~(1);
+    CCU1_CLK_M4_ETHERNET_CFG &= ~(1);
+    //CCU1_CLK_M4_USB0_CFG &= ~(1);
+    CCU1_CLK_M4_EMC_CFG &= ~(1);
+    CCU1_CLK_M4_SDIO_CFG &= ~(1);
+    //CCU1_CLK_M4_DMA_CFG &= ~(1);
+    //CCU1_CLK_M4_M4CORE_CFG &= ~(1);
+    CCU1_CLK_M4_SCT_CFG &= ~(1);
+    CCU1_CLK_M4_USB1_CFG &= ~(1);
+    CCU1_CLK_M4_EMCDIV_CFG &= ~(1);
+    //CCU1_CLK_M4_M0APP_CFG &= ~(1);
+    //CCU1_CLK_M4_VADC_CFG &= ~(1);
+    //CCU1_CLK_M4_WWDT_CFG &= ~(1);
+    CCU1_CLK_M4_USART0_CFG &= ~(1);
+    CCU1_CLK_M4_UART1_CFG &= ~(1);
+    //CCU1_CLK_M4_SSP0_CFG &= ~(1);
+    //CCU1_CLK_M4_SSP1_CFG &= ~(1);
+    CCU1_CLK_M4_TIMER0_CFG &= ~(1);
+    CCU1_CLK_M4_TIMER1_CFG &= ~(1);
+    //CCU1_CLK_M4_SCU_CFG &= ~(1);
+    //CCU1_CLK_M4_CREG_CFG &= ~(1);
+    CCU1_CLK_M4_RITIMER_CFG &= ~(1);
+    CCU1_CLK_M4_USART2_CFG &= ~(1);
+    CCU1_CLK_M4_USART3_CFG &= ~(1);
+    CCU1_CLK_M4_TIMER2_CFG &= ~(1);
+    CCU1_CLK_M4_TIMER3_CFG &= ~(1);
+
+    CCU1_CLK_M4_QEI_CFG &= ~(1);
+
+    CCU1_CLK_PERIPH_SGPIO_CFG &= ~(1);
 }
 
 

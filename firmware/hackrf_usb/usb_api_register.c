@@ -198,11 +198,10 @@ usb_request_status_t usb_vendor_request_read_mcp3021(
 usb_request_status_t usb_vendor_request_sample(
 	usb_endpoint_t* const endpoint, const usb_transfer_stage_t stage)
 {
-
+    uint32_t data = (endpoint->setup.value<<16)|endpoint->setup.index;
 	if (stage == USB_TRANSFER_STAGE_SETUP)
 	{
-        //ADCHS_restart_dma();
-        sample();
+        sample(data);
         usb_transfer_schedule_ack(endpoint->in);
 	}
     return USB_REQUEST_STATUS_OK;

@@ -69,6 +69,7 @@ void ADCHS_DMA_init_stop(void)
 }
 
 void ADCHS_restart_dma(void) {
+  LPC_ADCHS->FLUSH = 1;
   LPC_GPDMA->C0SRCADDR = adchs_dma_lli[0].src_addr;
   LPC_GPDMA->C0DESTADDR = adchs_dma_lli[0].dst_addr;
   LPC_GPDMA->C0CONTROL = adchs_dma_lli[0].control;
@@ -94,10 +95,16 @@ void ADCHS_DMA_init(uint32_t dest_addr, uint8_t packed)
   nb_dma_transfer = ADCHS_DATA_BUFFER_SIZE_BYTE / (ADC_FIFO_LEVEL * ADCHS_DMA_NUM_LLI);
   nb_dma_transfer = (nb_dma_transfer * ADC_FIFO_LEVEL) / 4;
 
+  uint32_t j;
   for(i=0; i<ADCHS_DMA_NUM_LLI; i++)
   {
+	if (i == 0) {
+		j = ADCHS_DMA_NUM_LLI-1;
+	} else {
+		j = (i-1)%ADCHS_DMA_NUM_LLI;
+	}
     adchs_dma_lli[i].src_addr = ADCHS_DMA_READ_SRC;
-    adchs_dma_lli[i].dst_addr = ((uint32_t)dest_addr) + (nb_dma_transfer*4*i);
+    adchs_dma_lli[i].dst_addr = ((uint32_t)dest_addr) + (nb_dma_transfer*4*j);
     /* Modulo with round rubin last LLI point to First in infinite loop */
     adchs_dma_lli[i].next_lli = (uint32_t)(&adchs_dma_lli[(i+1)%ADCHS_DMA_NUM_LLI]);
 
