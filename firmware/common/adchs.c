@@ -69,7 +69,17 @@ void ADCHS_DMA_init_stop(void)
 }
 
 void ADCHS_restart_dma(void) {
-  LPC_ADCHS->FLUSH = 1;
+
+  //Disable DMA while configuring it
+  LPC_GPDMA->C0CONFIG =  (0x0)        |          // Enable bit
+                     (ADCHS_DMA_READ << 1) |
+                     (0x0 << 6)   |
+                     (0x2 << 11)  |
+                     (0x1 << 14)  |
+                     (0x1 << 15);
+
+  LPC_GPDMA->CONFIG = 0x00;
+
   LPC_GPDMA->C0SRCADDR = adchs_dma_lli[0].src_addr;
   LPC_GPDMA->C0DESTADDR = adchs_dma_lli[0].dst_addr;
   LPC_GPDMA->C0CONTROL = adchs_dma_lli[0].control;
@@ -80,6 +90,9 @@ void ADCHS_restart_dma(void) {
                          (0x2 << 11)  |
                          (0x1 << 14)  |
                          (0x1 << 15);
+  //Flushes old samples from FIFO
+  LPC_ADCHS->FLUSH = 1;
+  LPC_GPDMA->CONFIG = 0x01;
 }
 
 void ADCHS_DMA_init(uint32_t dest_addr, uint8_t packed)
@@ -98,13 +111,8 @@ void ADCHS_DMA_init(uint32_t dest_addr, uint8_t packed)
   uint32_t j;
   for(i=0; i<ADCHS_DMA_NUM_LLI; i++)
   {
-	if (i == 0) {
-		j = ADCHS_DMA_NUM_LLI-1;
-	} else {
-		j = (i-1)%ADCHS_DMA_NUM_LLI;
-	}
     adchs_dma_lli[i].src_addr = ADCHS_DMA_READ_SRC;
-    adchs_dma_lli[i].dst_addr = ((uint32_t)dest_addr) + (nb_dma_transfer*4*j);
+    adchs_dma_lli[i].dst_addr = ((uint32_t)dest_addr) + (nb_dma_transfer*4*i);
     /* Modulo with round rubin last LLI point to First in infinite loop */
     adchs_dma_lli[i].next_lli = (uint32_t)(&adchs_dma_lli[(i+1)%ADCHS_DMA_NUM_LLI]);
 
@@ -120,7 +128,7 @@ void ADCHS_DMA_init(uint32_t dest_addr, uint8_t packed)
                                (0x0UL << 31);
   }
 
-  adchs_dma_lli[0].next_lli = 0;
+  adchs_dma_lli[i-1].next_lli = 0;
   if(packed)
   {
     for(i=0; i<ADCHS_DMA_NUM_LLI; i++)
@@ -130,8 +138,10 @@ void ADCHS_DMA_init(uint32_t dest_addr, uint8_t packed)
   }
   else
   {
-    //adchs_dma_lli[(ADCHS_DMA_NUM_LLI/2)-1].control |= (0x1UL << 31);
-    adchs_dma_lli[i-1].control |= (0x1UL << 31);
+    //Raise interrupt when half have been transferred
+    //This assumes we can fill the rest faster than first part
+    //can be sent to the computer
+    adchs_dma_lli[(ADCHS_DMA_NUM_LLI/2)-1].control |= (0x1UL << 31);
   }
 
   LPC_GPDMA->C0SRCADDR = adchs_dma_lli[0].src_addr;

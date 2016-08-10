@@ -340,9 +340,6 @@ void cpu_clock_pll1_max_speed(void)
 
 void ssp1_init(void)
 {
-	/*
-     * Raise ADF4158 CE pin to de-select the device
-	 */
     gpio_clear(PORT_SOURCE_CE, PIN_SOURCE_CE);
     gpio_set(PORT_SOURCE_LE, PIN_SOURCE_LE);
     gpio_clear(PORT_LO_CE, PIN_LO_LE);
@@ -439,8 +436,6 @@ void pin_setup(void) {
 	GPIO6_DIR = 0;
 	GPIO7_DIR = 0;
 
-    ////rf_disable();
-
     ///* Set safe GPIO states */
     gpio_set(PORT_FILTER1, PIN_FILTER1);
     gpio_clear(PORT_FILTER2, PIN_FILTER2);
@@ -466,17 +461,10 @@ void pin_setup(void) {
 
     GPIO5_DIR |= (PIN_RX_V1 | PIN_RX_V2 | PIN_LO_RF_ENABLE | PIN_SOURCE_RF_ENABLE);
 
-	/* Configure SSP1 Peripheral (to be moved later in SSP driver) */
-////	scu_pinmux(SCU_SSP1_MISO, (SCU_SSP_IO | SCU_CONF_FUNCTION5));
-////	scu_pinmux(SCU_SSP1_MOSI, (SCU_SSP_IO | SCU_CONF_FUNCTION5));
-////	scu_pinmux(SCU_SSP1_SCK, (SCU_SSP_IO | SCU_CONF_FUNCTION1));
-
     // Disable clock outputs
     scu_pinmux(CLK0, SCU_CLK_IN | SCU_CONF_FUNCTION7);
 	scu_pinmux(CLK2, SCU_CLK_IN | SCU_CONF_FUNCTION7);
 
     //XXX: Debug
 	//scu_pinmux(CLK2, SCU_CLK_IN | SCU_CONF_FUNCTION1);
-
-	//sgpio_configure_pin_functions();
 }

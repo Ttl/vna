@@ -124,17 +124,16 @@ void source_write_register(uint32_t data) {
     gpio_set(PORT_SOURCE_LE, PIN_SOURCE_LE);
 }
 
-void wait_for_source_lock() {
-    while (gpio_get(PORT_SOURCE_LD, PIN_SOURCE_LD ));
-}
-
-void wait_for_lo_lock() {
-    while (gpio_get(PORT_LO_LD, PIN_LO_LD ));
-}
-
 void wait_for_lock() {
     //Assumes that PORT_SOURCE_LD == PORT_LO_LD
-    while (gpio_get(PORT_SOURCE_LD, PIN_SOURCE_LD | PIN_LO_LD) == (PIN_SOURCE_LD | PIN_LO_LD));
+    int i = 0;
+    while ( i < 1000) {
+        if (!gpio_get(PORT_SOURCE_LD, PIN_SOURCE_LD | PIN_LO_LD)) {
+            i = 0;
+        } else {
+            i++;
+        }
+    };
 }
 
 /* FIXME: Send only 8 bits */
@@ -155,7 +154,6 @@ void sample(uint32_t ports) {
     if (ports == 1) {
         set_rx_channel(0);
         wait_for_lock();
-        delay(1000);
         ADCHS_restart_dma();
         delay(2*CH_DELAY);
         set_rx_channel(2);
@@ -164,7 +162,6 @@ void sample(uint32_t ports) {
     if (ports == 2) {
         set_rx_channel(1);
         wait_for_lock();
-        delay(1000);
         ADCHS_restart_dma();
         delay(2*CH_DELAY);
         set_rx_channel(3);
@@ -174,8 +171,6 @@ void sample(uint32_t ports) {
         // 2000 samples/channel. 104 MHz system clock rate, 9.6 MHz ADC clock.
         set_rx_channel(0);
         wait_for_lock();
-        //Switch settling time 50us
-        delay(1000);
         ADCHS_restart_dma();
         delay(CH_DELAY);
         set_rx_channel(1);
@@ -183,10 +178,5 @@ void sample(uint32_t ports) {
         set_rx_channel(2);
         delay(CH_DELAY);
         set_rx_channel(3);
-    // FIXME
-#if 1
-        delay(CH_DELAY);
-        set_rx_channel(0);
-#endif
     }
 }
