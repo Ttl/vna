@@ -202,7 +202,7 @@ class MAX2871():
 
 
 class VNA():
-    def __init__(self, lo2_freq=2e6, output_power=0, averages=1, dummy=False):
+    def __init__(self, lo2_freq=2e6, output_power=0, averages=1, averages_at_low_f=None, dummy=False):
 
         if dummy:
             self.device = DummyDevice()
@@ -215,6 +215,12 @@ class VNA():
 
         self.sources_set = False
 
+        #Threshold for extra averaging at low frequencies
+        self.low_f = 400e6
+        if averages_at_low_f == None:
+            self.averages_at_low_f = averages
+        else:
+            self.averages_at_low_f = averages_at_low_f
         #PLL reference frequency
         self.ref_freq = 19.2e6
         #Mixer output frequency and digital IQ mixing frequency
@@ -318,7 +324,9 @@ class VNA():
     def i_to_ch(self, i, ports):
         """Baseband signal index to channel name"""
         if ports == [1,2]:
-            return ['rx2','a','b','rx1'][i]
+            #return ['rx2','a','b','rx1'][i]
+            return ['rx1','rx2','a','b'][i]
+
         if ports == [1]:
             return ['rx1','a'][i]
         if ports == [2]:
@@ -384,26 +392,34 @@ class VNA():
                     self.program_sources()
                     self.sources_set = True
 
-                for a in xrange(self.averages):
+                if freq < self.low_f:
+                    averages = self.averages_at_low_f
+                else:
+                    averages = self.averages
+                for a in xrange(averages):
+                    #Wait for PLLs to lock
+                    #Hardware lock output doesn't seem to be accurate enough
+                    time.sleep(0.5e-3)
+
                     self.sample(ports)
 
                     data = self.device.read(0x81, 32768)
                     y = np.array(self.assemble_samples(data))
+
                     t = np.linspace(0,len(y)/self.fsample, len(y))
+                    lo_i = np.cos(-2*np.pi*lo2_f*t)
+                    lo_q = np.sin(-2*np.pi*lo2_f*t)
 
                     #Digital IQ mixing
-
                     for i in xrange(2*len(ports)):
                         if ports == [1,2]:
-                            s_start, s_end = [(0,3785), (3850,7740), (7830,11650), (11766, len(y))][i]
+                            #s_start, s_end = [(0,3785), (3850,7732), (7830,11650), (11766, len(y))][i]
+                            s_start, s_end = [(0,3960), (3998,7894), (7950,11924), (11963, len(y))][i]
                         else:
                             s_start, s_end = [(0,3814), (3871, len(y))][i]
-                        ts = t[s_start:s_end]
-                        lo_i = np.cos(-2*np.pi*lo2_f*ts)
-                        lo_q = np.sin(-2*np.pi*lo2_f*ts)
                         x = y[s_start:s_end]
                         x = x-np.mean(x) #Subtract DC
-                        iq = np.mean(lo_i*x+1j*np.mean(lo_q*x))
+                        iq = np.mean(lo_i[s_start:s_end]*x+1j*np.mean(lo_q[s_start:s_end]*x))
                         if a == 0:
                             iqs[e][(self.i_to_ch(i, ports),port)] = [iq]
                         else:
@@ -420,12 +436,12 @@ class VNA():
         else:
             ports = [1,2]
 
-        k = iqs[0].keys()[0]
-        averages = len(iqs[0][k])
 
         if len(ports) == 1:
             for f in xrange(len(freqs)):
                 s = []
+                k = iqs[f].keys()[0]
+                averages = len(iqs[f][k])
                 for a in xrange(averages):
                     if ports[0] == 1:
                         s.append(
@@ -442,6 +458,8 @@ class VNA():
                 s12 = []
                 s21 = []
                 s22 = []
+                k = iqs[f].keys()[0]
+                averages = len(iqs[f][k])
                 for a in xrange(averages):
                     #Switch correction
                     D = 1.0 - (iqs[f][('rx2',1)][a]/iqs[f][('rx1',1)][a])*(iqs[f][('rx1',2)][a]/iqs[f][('rx2',2)][a])
@@ -463,8 +481,8 @@ class VNA():
 
 if __name__ == "__main__":
 
-    vna = VNA(lo2_freq=2e6, output_power=0, averages=4, dummy=False)
-    freqs = np.linspace(30e6, 6.0e9, 200)
+    vna = VNA(lo2_freq=2e6, output_power=0, averages=3, averages_at_low_f=10)
+    freqs = np.linspace(30e6, 6.2e9, 200)
     ports = [1, 2]
 
     iqs = vna.measure_iq(freqs, ports)
