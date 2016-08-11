@@ -413,10 +413,9 @@ class VNA():
                     #Digital IQ mixing
                     for i in xrange(2*len(ports)):
                         if ports == [1,2]:
-                            #s_start, s_end = [(0,3785), (3850,7732), (7830,11650), (11766, len(y))][i]
                             s_start, s_end = [(0,3960), (3998,7894), (7950,11924), (11963, len(y))][i]
                         else:
-                            s_start, s_end = [(0,3814), (3871, len(y))][i]
+                            s_start, s_end = [(0,7872), (7960, len(y))][i]
                         x = y[s_start:s_end]
                         x = x-np.mean(x) #Subtract DC
                         iq = np.mean(lo_i[s_start:s_end]*x+1j*np.mean(lo_q[s_start:s_end]*x))
@@ -427,6 +426,10 @@ class VNA():
 
                 if len(ports) == 2:
                     print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx1',port)], iqs[e][('rx2',port)], iqs[e][('a',port)], iqs[e][('b',port)]])
+                elif ports == [1]:
+                    print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx1',1)], iqs[e][('a',1)]])
+                elif ports == [2]:
+                    print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx2',2)], iqs[e][('b',2)]])
         return iqs
 
     def iq_to_sparam(self, iqs, freqs):
