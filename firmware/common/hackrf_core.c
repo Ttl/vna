@@ -236,7 +236,7 @@ void cpu_clock_init(void)
     CCU1_CLK_M4_TIMER1_CFG &= ~(1);
     //CCU1_CLK_M4_SCU_CFG &= ~(1);
     //CCU1_CLK_M4_CREG_CFG &= ~(1);
-    CCU1_CLK_M4_RITIMER_CFG &= ~(1);
+    //CCU1_CLK_M4_RITIMER_CFG &= ~(1);
     CCU1_CLK_M4_USART2_CFG &= ~(1);
     CCU1_CLK_M4_USART3_CFG &= ~(1);
     CCU1_CLK_M4_TIMER2_CFG &= ~(1);
@@ -244,7 +244,7 @@ void cpu_clock_init(void)
 
     CCU1_CLK_M4_QEI_CFG &= ~(1);
 
-    CCU1_CLK_PERIPH_SGPIO_CFG &= ~(1);
+    //CCU1_CLK_PERIPH_SGPIO_CFG &= ~(1);
 }
 
 
@@ -467,4 +467,5 @@ void pin_setup(void) {
 
     //XXX: Debug
 	//scu_pinmux(CLK2, SCU_CLK_IN | SCU_CONF_FUNCTION1);
+    sgpio_configure_pin_functions();
 }

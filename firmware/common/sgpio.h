@@ -24,17 +24,9 @@
 
 #include <hackrf_core.h>
 
-typedef enum {
-	SGPIO_DIRECTION_RX,
-	SGPIO_DIRECTION_TX,
-} sgpio_direction_t;
 
 void sgpio_configure_pin_functions();
-void sgpio_test_interface();
-void sgpio_set_slice_mode(
-	const bool multi_slice
-);
+void fill_rng(void);
 void sgpio_configure(void);
-void sgpio_configure_clock(uint16_t preset, uint16_t reg);
 
 #endif//__SGPIO_H__

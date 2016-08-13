@@ -1,11 +1,20 @@
 #include <libopencm3/lpc43xx/gpio.h>
 #include <libopencm3/lpc43xx/scu.h>
 #include <libopencm3/lpc43xx/ssp.h>
+#include <libopencm3/lpc43xx/ritimer.h>
 #include "hackrf_core.h"
 #include "adchs.h"
+#include "sgpio.h"
+
+#define ENABLE_RITIMER() (RITIMER_CTRL =  (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3))
+#define DISABLE_RITIMER() (RITIMER_CTRL =  (1 << 0) | (1 << 1) | (1 << 2) | (0 << 3))
+
+static volatile uint8_t isr_done;
+static volatile uint8_t isr_count;
+static uint8_t isr_len_channels;
+static uint8_t isr_channels[4];
 
 static void spi_write_register(uint32_t data);
-
 static uint32_t spi_read_register(void);
 
 void enable_pa(void) {
@@ -148,35 +157,48 @@ void att_write_register(uint8_t data) {
     gpio_clear(PORT_ATT_LE, PIN_ATT_LE);
 }
 
+void ritimer_isr(void) {
+    ENABLE_RITIMER(); //Clear interrupt
+    if (isr_count >= isr_len_channels) {
+        DISABLE_RITIMER();
+        isr_done = 1;
+    } else {
+        set_rx_channel(isr_channels[isr_count++]);
+    }
+}
+
 void sample(uint32_t ports) {
-#define CH_DELAY 41000/5
+//MCU clock*(samples/f_fsample)/channels)
+#define CH_DELAY (120e6*(16384/9.6e6)/4)
+    isr_count = 0;
+    isr_done = 0;
+    RITIMER_COUNTER = 0;
 
     if (ports == 1) {
+        RITIMER_COMPVAL = 2*CH_DELAY;
+        isr_len_channels = 1;
+        isr_channels[0] = 2;
         set_rx_channel(0);
-        wait_for_lock();
-        ADCHS_restart_dma();
-        delay(2*CH_DELAY);
-        set_rx_channel(2);
-        delay(2*CH_DELAY);
     }
     if (ports == 2) {
+        RITIMER_COMPVAL = 2*CH_DELAY;
+        isr_len_channels = 1;
+        isr_channels[0] = 3;
         set_rx_channel(1);
-        wait_for_lock();
-        ADCHS_restart_dma();
-        delay(2*CH_DELAY);
-        set_rx_channel(3);
-        delay(2*CH_DELAY);
     }
     if (ports == 3) {
-        // 2000 samples/channel. 104 MHz system clock rate, 9.6 MHz ADC clock.
+        RITIMER_COMPVAL = CH_DELAY;
+        isr_len_channels = 3;
+        isr_channels[0] = 1;
+        isr_channels[1] = 2;
+        isr_channels[2] = 3;
         set_rx_channel(0);
-        wait_for_lock();
-        ADCHS_restart_dma();
-        delay(CH_DELAY);
-        set_rx_channel(1);
-        delay(CH_DELAY);
-        set_rx_channel(2);
-        delay(CH_DELAY);
-        set_rx_channel(3);
+    }
+
+    wait_for_lock();
+    ADCHS_restart_dma();
+    ENABLE_RITIMER();
+    while(isr_done == 0) {
+        fill_rng();
     }
 }

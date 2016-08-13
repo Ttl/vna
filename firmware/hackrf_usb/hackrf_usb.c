@@ -295,15 +295,18 @@ int main(void) {
 
 	nvic_set_priority(NVIC_USB0_IRQ, 255);
     nvic_set_priority(NVIC_DMA_IRQ, 1);
+    nvic_set_priority(NVIC_RITIMER_IRQ, 128);
 
     nvic_enable_irq(NVIC_DMA_IRQ);
+    nvic_enable_irq(NVIC_RITIMER_IRQ);
 
 	usb_run(&usb_device);
 	ssp1_init();
 
     adchs_start(0);
 
-    //sgpio_configure();
+    //SGPIO is used to make ADC dithering signal
+    sgpio_configure();
 
 	while(true) {
 
