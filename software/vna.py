@@ -373,6 +373,8 @@ class VNA():
 
     def measure_iq(self, freqs, ports=[1,2]):
         iqs = []
+
+        std = 0
         for port in ports:
             self.select_port(port)
             for e,freq in enumerate(freqs):
@@ -405,31 +407,45 @@ class VNA():
 
                     data = self.device.read(0x81, 32768)
                     y = np.array(self.assemble_samples(data))
-
                     t = np.linspace(0,len(y)/self.fsample, len(y))
+
+                    #f = [self.fsample*i/(len(y)) for i in xrange(len(y)//2+1)]
+                    #w = np.hanning(len(y))
+                    ##plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*y))))
+                    #plt.plot(y)
+                    #plt.show()
                     lo_i = np.cos(-2*np.pi*lo2_f*t)
                     lo_q = np.sin(-2*np.pi*lo2_f*t)
 
                     #Digital IQ mixing
                     for i in xrange(2*len(ports)):
                         if ports == [1,2]:
-                            s_start, s_end = [(0,3960), (3998,7894), (7950,11924), (11963, len(y))][i]
+                            s_start, s_end = [(0,4121), (4169,8272), (8325,12327), (12400, len(y))][i]
                         else:
-                            s_start, s_end = [(0,7872), (7960, len(y))][i]
+                            s_start, s_end = [(0,8262), (8358, len(y))][i]
                         x = y[s_start:s_end]
                         x = x-np.mean(x) #Subtract DC
+
+                        #f = [self.fsample*j/(len(x)) for j in xrange(len(x)//2+1)]
+                        #w = np.hanning(len(x))
+                        #plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*x))))
+                        ##plt.plot(x)
+                        #plt.show()
+
                         iq = np.mean(lo_i[s_start:s_end]*x+1j*np.mean(lo_q[s_start:s_end]*x))
                         if a == 0:
                             iqs[e][(self.i_to_ch(i, ports),port)] = [iq]
                         else:
                             iqs[e][(self.i_to_ch(i, ports),port)].append(iq)
 
+                std += np.std(iqs[e][(self.i_to_ch(i, ports),port)])
                 if len(ports) == 2:
                     print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx1',port)], iqs[e][('rx2',port)], iqs[e][('a',port)], iqs[e][('b',port)]])
                 elif ports == [1]:
                     print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx1',1)], iqs[e][('a',1)]])
                 elif ports == [2]:
                     print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx2',2)], iqs[e][('b',2)]])
+        #print std
         return iqs
 
     def iq_to_sparam(self, iqs, freqs):
