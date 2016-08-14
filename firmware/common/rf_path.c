@@ -10,9 +10,9 @@
 #define DISABLE_RITIMER() (RITIMER_CTRL =  (1 << 0) | (1 << 1) | (1 << 2) | (0 << 3))
 
 static volatile uint8_t isr_done;
-static volatile uint8_t isr_count;
-static uint8_t isr_len_channels;
-static uint8_t isr_channels[4];
+static uint32_t *isr_delays;
+static uint32_t isr_channels;
+static uint32_t isr_count;
 
 static void spi_write_register(uint32_t data);
 static uint32_t spi_read_register(void);
@@ -159,44 +159,27 @@ void att_write_register(uint8_t data) {
 
 void ritimer_isr(void) {
     ENABLE_RITIMER(); //Clear interrupt
-    if (isr_count >= isr_len_channels) {
+    if ( ((isr_channels & 0x0F) == 0x0F) || isr_count >= 4 ) {
         DISABLE_RITIMER();
         isr_done = 1;
     } else {
-        set_rx_channel(isr_channels[isr_count++]);
+        set_rx_channel(isr_channels & 0x0F);
+        isr_channels = isr_channels >> 4;
+        RITIMER_COMPVAL = isr_delays[isr_count++];
     }
 }
 
-void sample(uint32_t ports) {
-//MCU clock*(samples/f_fsample)/channels)
-#define CH_DELAY (120e6*(16384/9.6e6)/4)
+void sample(uint32_t channels, uint32_t *delays) {
     isr_count = 0;
     isr_done = 0;
-    RITIMER_COUNTER = 0;
-
-    if (ports == 1) {
-        RITIMER_COMPVAL = 2*CH_DELAY;
-        isr_len_channels = 1;
-        isr_channels[0] = 2;
-        set_rx_channel(0);
-    }
-    if (ports == 2) {
-        RITIMER_COMPVAL = 2*CH_DELAY;
-        isr_len_channels = 1;
-        isr_channels[0] = 3;
-        set_rx_channel(1);
-    }
-    if (ports == 3) {
-        RITIMER_COMPVAL = CH_DELAY;
-        isr_len_channels = 3;
-        isr_channels[0] = 1;
-        isr_channels[1] = 2;
-        isr_channels[2] = 3;
-        set_rx_channel(0);
-    }
+    RITIMER_COMPVAL = delays[0];
+    set_rx_channel( (channels & 0x0F) );
+    isr_channels = channels >> 4;
+    isr_delays = &delays[1];
 
     wait_for_lock();
     ADCHS_restart_dma();
+    RITIMER_COUNTER = 0;
     ENABLE_RITIMER();
     while(isr_done == 0) {
         fill_rng();

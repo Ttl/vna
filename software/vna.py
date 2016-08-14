@@ -223,6 +223,8 @@ class VNA():
             self.averages_at_low_f = averages_at_low_f
         #PLL reference frequency
         self.ref_freq = 19.2e6
+        #Microcontroller clock frequency
+        self.mcu_clock = 120e6
         #Mixer output frequency and digital IQ mixing frequency
         self.lo2_freq = lo2_freq
         #ADC sampling frequency
@@ -363,15 +365,48 @@ class VNA():
             att = 0
         self.write_att(att)
 
-    def sample(self, ports):
-        if ports == [1]:
-            self.device.ctrl_transfer(0x40, 20, 0, 1)
-        if ports == [2]:
-            self.device.ctrl_transfer(0x40, 20, 0, 2)
-        if ports == [1,2]:
-            self.device.ctrl_transfer(0x40, 20, 0, 3)
+    def sample(self, ports, source_port, all_channels=None):
 
-    def measure_iq(self, freqs, ports=[1,2]):
+        def ch_to_i(x):
+            return {'rx1': 0, 'a': 2, 'rx2': 1, 'b': 3}[x]
+
+        samples = 16384
+
+        if all_channels == False and ports == [1, 2]:
+            if source_port == 1:
+                channels = map(ch_to_i, ['rx1', 'a', 'b'])
+            else:
+                channels = map(ch_to_i, ['rx2', 'a', 'b'])
+        else:
+            if ports == [1]:
+                channels = map(ch_to_i, ['rx1', 'a'])
+            if ports == [2]:
+                channels = map(ch_to_i, ['rx2', 'b'])
+            if ports == [1, 2]:
+                if source_port == 1:
+                    channels = map(ch_to_i, ['rx1', 'rx2', 'a', 'b'])
+                else:
+                    channels = map(ch_to_i, ['rx1', 'rx2', 'a', 'b'])
+
+        #Equal delay = MCU clock*(samples/f_fsample)/channels)
+        delays = [int(self.mcu_clock*(samples/self.fsample)/len(channels))]*len(channels)
+
+        delays8 = []
+        for d in delays:
+            delays8.append((d >> 0*8) & 0xFF)
+            delays8.append((d >> 1*8) & 0xFF)
+            delays8.append((d >> 2*8) & 0xFF)
+            delays8.append((d >> 3*8) & 0xFF)
+
+        channel_word = 0x0F
+
+        for ch in channels[::-1]:
+            channel_word = (channel_word << 4) | ch
+        channel_word = channel_word & (2**32 -1)
+
+        self.device.ctrl_transfer(0x40, 20, channel_word >> 16, channel_word & 0xFFFF, ''.join(map(chr, delays8)))
+
+    def measure_iq(self, freqs, ports=[1,2], all_channels=True):
         iqs = []
 
         std = 0
@@ -403,17 +438,17 @@ class VNA():
                     #Hardware lock output doesn't seem to be accurate enough
                     time.sleep(0.5e-3)
 
-                    self.sample(ports)
+                    self.sample(ports, port, all_channels)
 
                     data = self.device.read(0x81, 32768)
                     y = np.array(self.assemble_samples(data))
                     t = np.linspace(0,len(y)/self.fsample, len(y))
 
-                    #f = [self.fsample*i/(len(y)) for i in xrange(len(y)//2+1)]
-                    #w = np.hanning(len(y))
-                    ##plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*y))))
-                    #plt.plot(y)
-                    #plt.show()
+                    f = [self.fsample*i/(len(y)) for i in xrange(len(y)//2+1)]
+                    w = np.hanning(len(y))
+                    #plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*y))))
+                    plt.plot(y)
+                    plt.show()
                     lo_i = np.cos(-2*np.pi*lo2_f*t)
                     lo_q = np.sin(-2*np.pi*lo2_f*t)
 
@@ -500,8 +535,8 @@ class VNA():
 
 if __name__ == "__main__":
 
-    vna = VNA(lo2_freq=2e6, output_power=0, averages=3, averages_at_low_f=10)
-    freqs = np.linspace(30e6, 6.2e9, 200)
+    vna = VNA(lo2_freq=2e6, output_power=0, averages=1, averages_at_low_f=1)
+    freqs = np.linspace(30e6, 6.2e9, 400)
     ports = [1, 2]
 
     iqs = vna.measure_iq(freqs, ports)

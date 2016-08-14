@@ -36,6 +36,7 @@
 #include "adchs.h"
 
 uint8_t mcp3021_result[2];
+uint8_t setup_words[50];
 
 usb_request_status_t usb_vendor_request_write_source(
 	usb_endpoint_t* const endpoint,
@@ -198,11 +199,17 @@ usb_request_status_t usb_vendor_request_read_mcp3021(
 usb_request_status_t usb_vendor_request_sample(
 	usb_endpoint_t* const endpoint, const usb_transfer_stage_t stage)
 {
-    uint32_t data = (endpoint->setup.value<<16)|endpoint->setup.index;
+	uint16_t len = 0;
+    uint32_t channels = (endpoint->setup.value<<16)|endpoint->setup.index;
 	if (stage == USB_TRANSFER_STAGE_SETUP)
 	{
-        sample(data);
+        len = endpoint->setup.length;
+        usb_transfer_schedule_block(endpoint->out, &setup_words[0], len,
+						    NULL, NULL);
+    } else if (stage == USB_TRANSFER_STAGE_DATA) {
+        sample(channels, (uint32_t*)&setup_words[0]);
         usb_transfer_schedule_ack(endpoint->in);
 	}
     return USB_REQUEST_STATUS_OK;
 }
+

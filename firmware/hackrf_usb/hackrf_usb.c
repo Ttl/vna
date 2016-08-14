@@ -292,10 +292,12 @@ int main(void) {
 
 	usb_endpoint_init(&usb_endpoint_control_out);
 	usb_endpoint_init(&usb_endpoint_control_in);
+    usb_endpoint_init(&usb_endpoint_bulk_in);
 
 	nvic_set_priority(NVIC_USB0_IRQ, 255);
     nvic_set_priority(NVIC_DMA_IRQ, 1);
     nvic_set_priority(NVIC_RITIMER_IRQ, 128);
+
 
     nvic_enable_irq(NVIC_DMA_IRQ);
     nvic_enable_irq(NVIC_RITIMER_IRQ);

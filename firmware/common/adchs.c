@@ -108,7 +108,6 @@ void ADCHS_DMA_init(uint32_t dest_addr, uint8_t packed)
   nb_dma_transfer = ADCHS_DATA_BUFFER_SIZE_BYTE / (ADC_FIFO_LEVEL * ADCHS_DMA_NUM_LLI);
   nb_dma_transfer = (nb_dma_transfer * ADC_FIFO_LEVEL) / 4;
 
-  uint32_t j;
   for(i=0; i<ADCHS_DMA_NUM_LLI; i++)
   {
     adchs_dma_lli[i].src_addr = ADCHS_DMA_READ_SRC;
