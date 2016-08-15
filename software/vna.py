@@ -225,6 +225,8 @@ class VNA():
         self.ref_freq = 19.2e6
         #Microcontroller clock frequency
         self.mcu_clock = 120e6
+        #Time to switch the receiver SP4T switch
+        self.sp4t_sw_t = 15e-6
         #Mixer output frequency and digital IQ mixing frequency
         self.lo2_freq = lo2_freq
         #ADC sampling frequency
@@ -323,16 +325,9 @@ class VNA():
             raise ValueError("Invalid port name {}. Valid names: {}".format(p, choices.keys()))
         self.device.ctrl_transfer(0x40, 7, i, 0)
 
-    def i_to_ch(self, i, ports):
-        """Baseband signal index to channel name"""
-        if ports == [1,2]:
-            #return ['rx2','a','b','rx1'][i]
-            return ['rx1','rx2','a','b'][i]
-
-        if ports == [1]:
-            return ['rx1','a'][i]
-        if ports == [2]:
-            return ['rx2','b'][i]
+    def i_to_ch(self, i):
+        """Receiver SP4T switch control signal to channel number"""
+        return ['rx1','rx2','a','b'][i]
 
     def assemble_samples(self, x):
         y = []
@@ -391,6 +386,18 @@ class VNA():
         #Equal delay = MCU clock*(samples/f_fsample)/channels)
         delays = [int(self.mcu_clock*(samples/self.fsample)/len(channels))]*len(channels)
 
+        switch = [int(d*self.fsample/self.mcu_clock) for d in delays]
+        switch = np.cumsum(switch)
+
+        samples_delays1 = [0]
+        samples_delays2 = []
+        for s in switch[:-1]:
+            samples_delays2.append(s)
+            samples_delays1.append(s + int(self.sp4t_sw_t*self.fsample))
+        samples_delays2.append(samples)
+
+        sample_delays = zip(samples_delays1, samples_delays2)
+
         delays8 = []
         for d in delays:
             delays8.append((d >> 0*8) & 0xFF)
@@ -406,10 +413,11 @@ class VNA():
 
         self.device.ctrl_transfer(0x40, 20, channel_word >> 16, channel_word & 0xFFFF, ''.join(map(chr, delays8)))
 
+        return map(self.i_to_ch, channels), sample_delays
+
     def measure_iq(self, freqs, ports=[1,2], all_channels=True):
         iqs = []
 
-        std = 0
         for port in ports:
             self.select_port(port)
             for e,freq in enumerate(freqs):
@@ -438,49 +446,46 @@ class VNA():
                     #Hardware lock output doesn't seem to be accurate enough
                     time.sleep(0.5e-3)
 
-                    self.sample(ports, port, all_channels)
+                    channels, delays = self.sample(ports, port, all_channels)
 
                     data = self.device.read(0x81, 32768)
                     y = np.array(self.assemble_samples(data))
                     t = np.linspace(0,len(y)/self.fsample, len(y))
 
-                    f = [self.fsample*i/(len(y)) for i in xrange(len(y)//2+1)]
-                    w = np.hanning(len(y))
-                    #plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*y))))
-                    plt.plot(y)
-                    plt.show()
+                    #f = [self.fsample*i/(len(y)) for i in xrange(len(y)//2+1)]
+                    #w = np.hanning(len(y))
+                    ##plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*y))))
+                    #plt.plot(y)
+                    #plt.show()
                     lo_i = np.cos(-2*np.pi*lo2_f*t)
                     lo_q = np.sin(-2*np.pi*lo2_f*t)
 
                     #Digital IQ mixing
-                    for i in xrange(2*len(ports)):
-                        if ports == [1,2]:
-                            s_start, s_end = [(0,4121), (4169,8272), (8325,12327), (12400, len(y))][i]
-                        else:
-                            s_start, s_end = [(0,8262), (8358, len(y))][i]
+                    for i in xrange(len(delays)):
+                        s_start, s_end = delays[i]
                         x = y[s_start:s_end]
                         x = x-np.mean(x) #Subtract DC
 
                         #f = [self.fsample*j/(len(x)) for j in xrange(len(x)//2+1)]
                         #w = np.hanning(len(x))
-                        #plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*x))))
-                        ##plt.plot(x)
+                        ##plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*x))))
+                        #plt.plot(x)
                         #plt.show()
 
                         iq = np.mean(lo_i[s_start:s_end]*x+1j*np.mean(lo_q[s_start:s_end]*x))
                         if a == 0:
-                            iqs[e][(self.i_to_ch(i, ports),port)] = [iq]
+                            iqs[e][(channels[i],port)] = [iq]
                         else:
-                            iqs[e][(self.i_to_ch(i, ports),port)].append(iq)
+                            iqs[e][(channels[i],port)].append(iq)
 
-                std += np.std(iqs[e][(self.i_to_ch(i, ports),port)])
-                if len(ports) == 2:
-                    print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx1',port)], iqs[e][('rx2',port)], iqs[e][('a',port)], iqs[e][('b',port)]])
-                elif ports == [1]:
-                    print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx1',1)], iqs[e][('a',1)]])
-                elif ports == [2]:
-                    print map(lambda x: 20*np.log10(np.abs(x)), [iqs[e][('rx2',2)], iqs[e][('b',2)]])
-        #print std
+                meas = [iqs[e][k] for k in iqs[e].keys() if k[1] == port]
+                chs = [k for k in iqs[e].keys() if k[1] == port]
+                chs, meas = zip(*sorted(zip(chs, meas)))
+                log_meas = map(lambda x: np.mean(20*np.log10(np.abs(x))), meas)
+                for i in xrange(len(chs)):
+                    print '{}: {:6.2f}'.format(chs[i], log_meas[i]) ,
+                print
+
         return iqs
 
     def iq_to_sparam(self, iqs, freqs):
@@ -539,7 +544,7 @@ if __name__ == "__main__":
     freqs = np.linspace(30e6, 6.2e9, 400)
     ports = [1, 2]
 
-    iqs = vna.measure_iq(freqs, ports)
+    iqs = vna.measure_iq(freqs, ports, True)
     pickle.dump((freqs,iqs), open('iqs', 'w'))
     net = vna.iq_to_sparam(iqs, freqs)
 
