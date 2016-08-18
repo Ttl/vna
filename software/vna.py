@@ -5,9 +5,10 @@ import time
 import lmh2110_cal
 import numpy as np
 import skrf
-from scipy.signal import butter, sosfilt
+from scipy.signal import butter, sosfilt, sosfilt_zi
 import pickle
 import matplotlib.pyplot as plt
+from scipy import stats
 
 class DummyDevice():
     def ctrl_transfer(self, bmRequestType, bRequest, wValue=0, wIndex=0,
@@ -232,6 +233,14 @@ class VNA():
         #ADC sampling frequency
         self.fsample = self.ref_freq/2
 
+        #Oscillator frequency offset guess
+        try:
+            self.f_offset = pickle.load(open('vna_f_offset.p', 'r'))
+        except IOError:
+            self.f_offset = 0
+
+        self.kalman_q = 0.01e-6
+
         self.output_power = output_power
         self.averages = averages
 
@@ -351,6 +360,18 @@ class VNA():
         y = sosfilt(sos, data)
         return y
 
+    def butter_lowpass(self, highcut, order=5):
+        nyq = 0.5 * self.fsample
+        high = highcut / nyq
+        sos = butter(order, high, btype='lowpass', analog=False, output='sos')
+        return sos
+
+    def butter_lowpass_filter(self, data, highcut, order=5, init=0):
+        sos = self.butter_lowpass(highcut, order=order)
+        zi = sosfilt_zi(sos)
+        y = sosfilt(sos, data, zi=init*zi)[0]
+        return y
+
     def set_output_power(self, freq, power):
         freq_i = np.searchsorted(self.power_correction_f, freq)
         freq_i = min(len(self.output_power_ref)-1, freq_i)
@@ -379,9 +400,9 @@ class VNA():
                 channels = map(ch_to_i, ['rx2', 'b'])
             if ports == [1, 2]:
                 if source_port == 1:
-                    channels = map(ch_to_i, ['rx1', 'rx2', 'a', 'b'])
+                    channels = map(ch_to_i, ['rx1', 'a', 'b', 'rx2'])
                 else:
-                    channels = map(ch_to_i, ['rx1', 'rx2', 'a', 'b'])
+                    channels = map(ch_to_i, ['rx1', 'a', 'b', 'rx2'])
 
         #Equal delay = MCU clock*(samples/f_fsample)/channels)
         delays = [int(self.mcu_clock*(samples/self.fsample)/len(channels))]*len(channels)
@@ -418,6 +439,9 @@ class VNA():
     def measure_iq(self, freqs, ports=[1,2], all_channels=True):
         iqs = []
 
+        t = np.linspace(0,16384/self.fsample, 16384)
+        kalman_p = 100e-6
+
         for port in ports:
             self.select_port(port)
             for e,freq in enumerate(freqs):
@@ -428,7 +452,7 @@ class VNA():
                 self.select_filter(source_freq)
                 real_lo_f = self.lo_pll.freq_to_regs(lo_freq, self.ref_freq, apwr=self.lo_apwr)
                 real_source_f = self.source_pll.freq_to_regs(source_freq, self.ref_freq, apwr=self.source_apwr)
-                lo2_f = real_source_f - real_lo_f
+                lo2_f_calc = real_source_f - real_lo_f
 
                 self.program_sources()
                 if not self.sources_set:
@@ -441,10 +465,12 @@ class VNA():
                     averages = self.averages_at_low_f
                 else:
                     averages = self.averages
+
+                #Wait for PLLs to lock
+                #Hardware lock output doesn't seem to be accurate enough
+                time.sleep(0.5e-3)
+
                 for a in xrange(averages):
-                    #Wait for PLLs to lock
-                    #Hardware lock output doesn't seem to be accurate enough
-                    time.sleep(0.5e-3)
 
                     channels, delays = self.sample(ports, port, all_channels)
 
@@ -457,6 +483,8 @@ class VNA():
                     ##plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*y))))
                     #plt.plot(y)
                     #plt.show()
+
+                    lo2_f = lo2_f_calc*(1+self.f_offset)
                     lo_i = np.cos(-2*np.pi*lo2_f*t)
                     lo_q = np.sin(-2*np.pi*lo2_f*t)
 
@@ -466,26 +494,67 @@ class VNA():
                         x = y[s_start:s_end]
                         x = x-np.mean(x) #Subtract DC
 
+                        x = self.butter_bandpass_filter(x, 0.75*self.lo2_freq, 1.25*self.lo2_freq, order=7)
                         #f = [self.fsample*j/(len(x)) for j in xrange(len(x)//2+1)]
                         #w = np.hanning(len(x))
-                        ##plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*x))))
-                        #plt.plot(x)
+                        #plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*x))))
+                        ##plt.plot(x)
                         #plt.show()
 
-                        iq = np.mean(lo_i[s_start:s_end]*x+1j*np.mean(lo_q[s_start:s_end]*x))
+                        iq = (lo_i[s_start:s_end]+1j*lo_q[s_start:s_end])*x
+
+                        #Oscillator frequency offset estimation
+                        if channels[i] == 'rx{}'.format(port):
+                            init_len = max(100, int(0.05*len(iq)))
+                            init_val = np.mean(iq[:init_len])
+                            iq = self.butter_lowpass_filter(iq, 300e3, order=5, init=np.mean(init_val))
+                            iq_angle = (180/(np.pi)*np.unwrap(np.arctan2(np.imag(iq),np.real(iq))))[init_len:]
+                            slope, intercept, r_value, p_value, std_err = stats.linregress(range(len(iq_angle)), iq_angle)
+                            f_diff = slope*self.fsample/360.
+                            f_error = f_diff/self.lo2_freq
+
+                            z = self.f_offset+f_error
+                            pm = kalman_p + self.kalman_q
+
+                            k = pm/(pm + std_err)
+                            self.f_offset = self.f_offset + k*(z - self.f_offset)
+                            kalman_p = (1-k)*pm
+
+                            #Correct IQ
+                            lo2_f = lo2_f_calc*(1+self.f_offset)
+                            lo_i = np.cos(-2*np.pi*lo2_f*t)
+                            lo_q = np.sin(-2*np.pi*lo2_f*t)
+                            iq = (lo_i[s_start:s_end]+1j*lo_q[s_start:s_end])*x
+
+                            #plt.plot(np.sqrt(iq_r**2+iq_i**2))
+                            #plt.plot(iq_angle)
+                            #plt.show()
+
+                        iq = np.mean(iq)
                         if a == 0:
                             iqs[e][(channels[i],port)] = [iq]
                         else:
                             iqs[e][(channels[i],port)].append(iq)
 
-                meas = [iqs[e][k] for k in iqs[e].keys() if k[1] == port]
+                if port == 1:
+                    norm = np.angle(iqs[e][('rx1',1)])
+                else:
+                    norm = np.angle(iqs[e][('rx2',2)])
+
                 chs = [k for k in iqs[e].keys() if k[1] == port]
+                for ch in chs:
+                    z = 0
+                    for j, a in enumerate(iqs[e][ch]):
+                        z += a*np.exp(-1j*norm[j])
+                    iqs[e][ch] = z/len(iqs[e][ch])
+
+                meas = [iqs[e][k] for k in chs]
                 chs, meas = zip(*sorted(zip(chs, meas)))
-                log_meas = map(lambda x: np.mean(20*np.log10(np.abs(x))), meas)
                 for i in xrange(len(chs)):
-                    print '{}: {:6.2f}'.format(chs[i], log_meas[i]) ,
+                    print '{} {}: {:5.1f} {:6.1f}'.format(port, chs[i][0], 20*np.log10(np.abs(meas[i])), np.angle(meas[i])*180/np.pi) ,
                 print
 
+        pickle.dump(self.f_offset, open('vna_f_offset.p', 'w'))
         return iqs
 
     def iq_to_sparam(self, iqs, freqs):
@@ -498,38 +567,27 @@ class VNA():
 
         if len(ports) == 1:
             for f in xrange(len(freqs)):
-                s = []
-                k = iqs[f].keys()[0]
-                averages = len(iqs[f][k])
-                for a in xrange(averages):
-                    if ports[0] == 1:
-                        s.append(
-                                iqs[f][('a',1)][a]/iqs[f][('rx1',1)][a]
-                                )
-                    else:
-                        s.append(
-                                iqs[f][('b',2)][a]/iqs[f][('rx2',2)][a]
-                                )
-                sparams.append(np.mean(s))
+                if ports[0] == 1:
+                    s = iqs[f][('a',1)]/iqs[f][('rx1',1)]
+                else:
+                    s = iqs[f][('b',2)]/iqs[f][('rx2',2)]
+                sparams.append(s)
         elif len(ports) == 2:
             for f in xrange(len(freqs)):
                 s11 = []
                 s12 = []
                 s21 = []
                 s22 = []
-                k = iqs[f].keys()[0]
-                averages = len(iqs[f][k])
-                for a in xrange(averages):
-                    #Switch correction
-                    D = 1.0 - (iqs[f][('rx2',1)][a]/iqs[f][('rx1',1)][a])*(iqs[f][('rx1',2)][a]/iqs[f][('rx2',2)][a])
-                    sm11 = (1.0/D)*( iqs[f][('a',1)][a]/iqs[f][('rx1',1)][a] - (iqs[f][('a',2)][a]/iqs[f][('rx2',2)][a])*(iqs[f][('rx2',1)][a]/iqs[f][('rx1',1)][a]) )
-                    sm12 = (1.0/D)*( iqs[f][('a',2)][a]/iqs[f][('rx2',2)][a] - (iqs[f][('a',1)][a]/iqs[f][('rx1',1)][a])*(iqs[f][('rx1',2)][a]/iqs[f][('rx2',2)][a]) )
-                    sm21 = (1.0/D)*( iqs[f][('b',1)][a]/iqs[f][('rx1',1)][a] - (iqs[f][('b',2)][a]/iqs[f][('rx2',2)][a])*(iqs[f][('rx2',1)][a]/iqs[f][('rx1',1)][a]) )
-                    sm22 = (1.0/D)*( iqs[f][('b',2)][a]/iqs[f][('rx2',2)][a] - (iqs[f][('b',1)][a]/iqs[f][('rx1',1)][a])*(iqs[f][('rx1',2)][a]/iqs[f][('rx2',2)][a]) )
-                    s11.append(sm11)
-                    s12.append(sm12)
-                    s21.append(sm21)
-                    s22.append(sm22)
+                #Switch correction
+                D = 1.0 - (iqs[f][('rx2',1)]/iqs[f][('rx1',1)])*(iqs[f][('rx1',2)]/iqs[f][('rx2',2)])
+                sm11 = (1.0/D)*( iqs[f][('a',1)]/iqs[f][('rx1',1)] - (iqs[f][('a',2)]/iqs[f][('rx2',2)])*(iqs[f][('rx2',1)]/iqs[f][('rx1',1)]) )
+                sm12 = (1.0/D)*( iqs[f][('a',2)]/iqs[f][('rx2',2)] - (iqs[f][('a',1)]/iqs[f][('rx1',1)])*(iqs[f][('rx1',2)]/iqs[f][('rx2',2)]) )
+                sm21 = (1.0/D)*( iqs[f][('b',1)]/iqs[f][('rx1',1)] - (iqs[f][('b',2)]/iqs[f][('rx2',2)])*(iqs[f][('rx2',1)]/iqs[f][('rx1',1)]) )
+                sm22 = (1.0/D)*( iqs[f][('b',2)]/iqs[f][('rx2',2)] - (iqs[f][('b',1)]/iqs[f][('rx1',1)])*(iqs[f][('rx1',2)]/iqs[f][('rx2',2)]) )
+                s11.append(sm11)
+                s12.append(sm12)
+                s21.append(sm21)
+                s22.append(sm22)
                 sparams.append( [[np.mean(s11), np.mean(s12)], [np.mean(s21), np.mean(s22)]] )
 
         return skrf.Network(s=sparams, f=freqs, f_unit='Hz')
@@ -540,7 +598,7 @@ class VNA():
 
 if __name__ == "__main__":
 
-    vna = VNA(lo2_freq=2e6, output_power=0, averages=1, averages_at_low_f=1)
+    vna = VNA(lo2_freq=2e6, output_power=0, averages=2, averages_at_low_f=5)
     freqs = np.linspace(30e6, 6.2e9, 400)
     ports = [1, 2]
 
