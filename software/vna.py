@@ -22,14 +22,14 @@ class MAX2871():
         self.register_def = {
                 0:{'int':(31, 1), 'n':(15, 16), 'frac':(3, 12)},
                 1:{'reserved0':(31, 1), 'cpl':(29, 2), 'cpt': (27, 2), 'p':(15,12), 'm':(3,12)},
-                2:{'lds':(31,1), 'sdn':(29,2), 'mux':(26,3), 'dbr':(25,1), 'rdiv2':(24,1), 'r':(14,9),
+                2:{'lds':(31,1), 'sdn':(29,2), 'mux':(26,3), 'dbr':(25,1), 'rdiv2':(24,1), 'r':(14,10),
                     'reg4db':(13,1), 'cp':(9,4), 'ldf':(8,1), 'ldp':(7,1), 'pdp':(6,1), 'shdn':(5,1),
                     'tri':(4,1), 'rst':(3,1)},
-                3:{'vco':(26,5), 'vas_shdn':(25,1), 'vas_temp':(24,1), 'reserved1':(19,5), 'csm':(18,1),
+                3:{'vco':(26,6), 'vas_shdn':(25,1), 'vas_temp':(24,1), 'reserved1':(19,5), 'csm':(18,1),
                     'mutedel':(17,1), 'cdm':(15,2), 'cdiv':(3,12)},
                 4:{'reserved2':(29,3), 'sdldo':(28,1), 'sddiv':(27,1), 'sdref':(26,1), 'bs_msb':(24,2),
                     'fb':(23,1), 'diva':(20,3), 'bs_lsb':(12,8), 'sdvco':(11,1), 'mtld':(10,1),
-                    'bdiv':(9,1), 'bpwr':(6,2), 'rfa_en':(5,1), 'apwr':(3,2)},
+                    'bdiv':(9,1), 'rfb_en':(8,1), 'bpwr':(6,2), 'rfa_en':(5,1), 'apwr':(3,2)},
                 5:{'reserved3':(31,1), 'vas_dly':(29,2), 'reserved4':(26,3), 'sdlo_pll':(25,1),
                     'f01':(24,1), 'ld':(22,2), 'reserved5':(19,3), 'mux3':(18,1), 'reserved6':(7,11),
                     'adcs':(6,1), 'adcm':(3,3)},
@@ -127,6 +127,9 @@ class MAX2871():
             x = Fraction((fvco-d*fpd*n)/(d*fpd)).limit_denominator(4095)
             f = x.numerator
             m = x.denominator
+            if f == 1 and m == 1:
+                f = 4094
+                m = 4095
         else:
             #Fixed modulus
             f = int(round(m*(fvco-d*fpd*n)/(d*fpd)))
@@ -137,7 +140,7 @@ class MAX2871():
                 #TODO: Set integer mode
                 m = 2
             else:
-                raise ValueError("Invalid M value {}. 2 <= M <= 4095".format(m))
+                raise ValueError("Invalid M value {}. 2 <= M <= 4095. f = {}".format(m, f))
         self.write_value(m=m)
         self.write_value(frac=f)
 
@@ -232,14 +235,6 @@ class VNA():
         self.lo2_freq = lo2_freq
         #ADC sampling frequency
         self.fsample = self.ref_freq/2
-
-        #Oscillator frequency offset guess
-        try:
-            self.f_offset = pickle.load(open('vna_f_offset.p', 'r'))
-        except IOError:
-            self.f_offset = 0
-
-        self.kalman_q = 0.01e-6
 
         self.output_power = output_power
         self.averages = averages
@@ -352,7 +347,7 @@ class VNA():
         nyq = 0.5 * self.fsample
         low = lowcut / nyq
         high = highcut / nyq
-        sos = butter(order, [low, high], btype='bandpass', analog=False, output='sos')
+        sos = butter(order, [low, high], btype='bandpass', output='sos')
         return sos
 
     def butter_bandpass_filter(self, data, lowcut, highcut, order=5):
@@ -363,7 +358,7 @@ class VNA():
     def butter_lowpass(self, highcut, order=5):
         nyq = 0.5 * self.fsample
         high = highcut / nyq
-        sos = butter(order, high, btype='lowpass', analog=False, output='sos')
+        sos = butter(order, high, btype='lowpass', output='sos')
         return sos
 
     def butter_lowpass_filter(self, data, highcut, order=5, init=0):
@@ -439,9 +434,6 @@ class VNA():
     def measure_iq(self, freqs, ports=[1,2], all_channels=True):
         iqs = []
 
-        t = np.linspace(0,16384/self.fsample, 16384)
-        kalman_p = 100e-6
-
         for port in ports:
             self.select_port(port)
             for e,freq in enumerate(freqs):
@@ -452,7 +444,7 @@ class VNA():
                 self.select_filter(source_freq)
                 real_lo_f = self.lo_pll.freq_to_regs(lo_freq, self.ref_freq, apwr=self.lo_apwr)
                 real_source_f = self.source_pll.freq_to_regs(source_freq, self.ref_freq, apwr=self.source_apwr)
-                lo2_f_calc = real_source_f - real_lo_f
+                lo2_f = real_source_f - real_lo_f
 
                 self.program_sources()
                 if not self.sources_set:
@@ -476,15 +468,15 @@ class VNA():
 
                     data = self.device.read(0x81, 32768)
                     y = np.array(self.assemble_samples(data))
-                    t = np.linspace(0,len(y)/self.fsample, len(y))
+                    t = np.linspace(0,(len(y)-1)/self.fsample, len(y))
 
                     #f = [self.fsample*i/(len(y)) for i in xrange(len(y)//2+1)]
                     #w = np.hanning(len(y))
-                    ##plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*y))))
+                    #plt.plot(f, 20*np.log10(1.0/2**10*1.0/len(y)*np.abs(np.fft.rfft(w*y))))
+                    #plt.figure()
                     #plt.plot(y)
                     #plt.show()
 
-                    lo2_f = lo2_f_calc*(1+self.f_offset)
                     lo_i = np.cos(-2*np.pi*lo2_f*t)
                     lo_q = np.sin(-2*np.pi*lo2_f*t)
 
@@ -494,43 +486,33 @@ class VNA():
                         x = y[s_start:s_end]
                         x = x-np.mean(x) #Subtract DC
 
-                        x = self.butter_bandpass_filter(x, 0.75*self.lo2_freq, 1.25*self.lo2_freq, order=7)
+                        #x = self.butter_bandpass_filter(x, 0.8*self.lo2_freq, 1.1*self.lo2_freq, order=5)
                         #f = [self.fsample*j/(len(x)) for j in xrange(len(x)//2+1)]
                         #w = np.hanning(len(x))
-                        #plt.plot(f, 20*np.log10(np.abs(np.fft.rfft(w*x))))
-                        ##plt.plot(x)
+                        #plt.plot(f, 20*np.log10(1.0/2**10*1.0/len(y)*np.abs(np.fft.rfft(w*x))))
+                        #plt.plot(x)
                         #plt.show()
 
-                        iq = (lo_i[s_start:s_end]+1j*lo_q[s_start:s_end])*x
+                        iqr = (lo_i[s_start:s_end])*x
+                        iqi = (lo_q[s_start:s_end])*x
 
-                        #Oscillator frequency offset estimation
-                        if channels[i] == 'rx{}'.format(port):
-                            init_len = max(100, int(0.05*len(iq)))
-                            init_val = np.mean(iq[:init_len])
-                            iq = self.butter_lowpass_filter(iq, 300e3, order=5, init=np.mean(init_val))
-                            iq_angle = (180/(np.pi)*np.unwrap(np.arctan2(np.imag(iq),np.real(iq))))[init_len:]
-                            slope, intercept, r_value, p_value, std_err = stats.linregress(range(len(iq_angle)), iq_angle)
-                            f_diff = slope*self.fsample/360.
-                            f_error = f_diff/self.lo2_freq
+                        iqr = self.butter_lowpass_filter(iqr, 0.5e6, order=2, init=np.mean(iqr))
+                        iqi = self.butter_lowpass_filter(iqi, 0.5e6, order=2, init=np.mean(iqi))
 
-                            z = self.f_offset+f_error
-                            pm = kalman_p + self.kalman_q
+                        iq = iqr+1j*iqi
 
-                            k = pm/(pm + std_err)
-                            self.f_offset = self.f_offset + k*(z - self.f_offset)
-                            kalman_p = (1-k)*pm
+                        #plt.figure()
+                        #plt.plot(np.real(iq))
+                        #plt.plot(np.imag(iq))
+                        #plt.show()
 
-                            #Correct IQ
-                            lo2_f = lo2_f_calc*(1+self.f_offset)
-                            lo_i = np.cos(-2*np.pi*lo2_f*t)
-                            lo_q = np.sin(-2*np.pi*lo2_f*t)
-                            iq = (lo_i[s_start:s_end]+1j*lo_q[s_start:s_end])*x
-
-                            #plt.plot(np.sqrt(iq_r**2+iq_i**2))
-                            #plt.plot(iq_angle)
-                            #plt.show()
+                        #plt.figure()
+                        #plt.plot(np.cumsum(np.real(iq))/range(len(iq)))
+                        #plt.plot(np.cumsum(np.imag(iq))/range(len(iq)))
+                        #plt.show()
 
                         iq = np.mean(iq)
+
                         if a == 0:
                             iqs[e][(channels[i],port)] = [iq]
                         else:
@@ -554,7 +536,6 @@ class VNA():
                     print '{} {}: {:5.1f} {:6.1f}'.format(port, chs[i][0], 20*np.log10(np.abs(meas[i])), np.angle(meas[i])*180/np.pi) ,
                 print
 
-        pickle.dump(self.f_offset, open('vna_f_offset.p', 'w'))
         return iqs
 
     def iq_to_sparam(self, iqs, freqs):
@@ -598,8 +579,8 @@ class VNA():
 
 if __name__ == "__main__":
 
-    vna = VNA(lo2_freq=2e6, output_power=0, averages=2, averages_at_low_f=5)
-    freqs = np.linspace(30e6, 6.2e9, 400)
+    vna = VNA(lo2_freq=2e6, output_power=-5, averages=1, averages_at_low_f=1)
+    freqs = np.linspace(26e6, 6.2e9, 400)
     ports = [1, 2]
 
     iqs = vna.measure_iq(freqs, ports, True)
